@@ -11,8 +11,8 @@
 #define SOCKET_HAL_H_
 
 #include "hal_base.h"
-#include "iec60870_common.h" 
 #include "hal_serial.h"
+#include "iec60870_common.h"
 /**
  * \file hal_socket.h
  * \brief Abstraction layer TCP/IP sockets
@@ -20,17 +20,18 @@
  */
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
 /*! \defgroup hal Platform (Hardware/OS) abstraction layer
-   *
-   *  Platform abstraction layer. These functions have to be implemented when the library is
-   *  to be ported to new platforms. It might not be required to implement all interfaces
-   *  depending on the required library features.
-   *
-   *  @{
-   */
+ *
+ *  Platform abstraction layer. These functions have to be implemented when the library is
+ *  to be ported to new platforms. It might not be required to implement all interfaces
+ *  depending on the required library features.
+ *
+ *  @{
+ */
 
 /**
  * @defgroup HAL_SOCKET Interface to the TCP/IP stack (abstract socket layer)
@@ -60,11 +61,11 @@ typedef enum
     SOCKET_STATE_CONNECTED = 2
 } SocketState;
 
-int SerialPort_isRunning(SerialPort self);
+int
+SerialPort_isRunning(SerialPort self);
 
-
-void SerialPort_setLinkLayerStateCallback(SerialPort self, IEC60870_LinkLayerStateChangedHandler callback, void* parameter);
-
+void
+SerialPort_setLinkLayerStateCallback(SerialPort self, IEC60870_LinkLayerStateChangedHandler callback, void* parameter);
 
 /**
  * \brief Create a new connection handle set (HandleSet)
@@ -192,7 +193,6 @@ UdpSocket_sendTo(UdpSocket self, const char* address, int port, uint8_t* msg, in
 PAL_API int
 UdpSocket_receiveFrom(UdpSocket self, char* address, int maxAddrSize, uint8_t* msg, int msgSize);
 
-
 PAL_API void
 ServerSocket_listen(ServerSocket self);
 
@@ -271,15 +271,15 @@ Socket_setConnectTimeout(Socket self, uint32_t timeoutInMs);
 
 /**
  * \brief bind a socket to a particular IP address and port (for TcpSocket)
- * 
+ *
  * NOTE: Don't use the socket when this functions returns false!
- * 
+ *
  * \param self the client socket instance
  * \param srcAddress the local IP address or hostname as C string
  * \param srcPort the local TCP port to use. When < 1 the OS will chose the TCP port to use.
- * 
+ *
  * \return true in case of success, false otherwise
- */ 
+ */
 PAL_API bool
 Socket_bind(Socket self, const char* srcAddress, int srcPort);
 
