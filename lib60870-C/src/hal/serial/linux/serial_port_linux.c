@@ -9,22 +9,22 @@
 
 #include "lib_memory.h"
 
-#include <stdlib.h>
-#include <stdio.h>
-#include <string.h>
-#include <termios.h>
 #include <fcntl.h>
-#include <unistd.h>
-#include <sys/time.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <sys/select.h>
+#include <sys/time.h>
+#include <termios.h>
+#include <unistd.h>
 
 #include "hal_serial.h"
-#include "hal_time.h"
 #include "hal_socket.h"
-#include <unistd.h>
-#include "link_layer.h" 
+#include "hal_time.h"
+#include "link_layer.h"
 
-struct sSerialPort {
+struct sSerialPort
+{
     char interfaceName[100];
     int fd;
     int baudRate;
@@ -43,34 +43,36 @@ struct sSerialPort {
     LinkLayerState stateSocket;
     int retry;
 
-    
-    IEC60870_LinkLayerStateChangedHandler  stateCallback;
+    IEC60870_LinkLayerStateChangedHandler stateCallback;
     void* stateCallbackParameter;
 };
 
-void SerialPort_setLinkLayerStateCallback(SerialPort self, IEC60870_LinkLayerStateChangedHandler callback, void* parameter)
+void
+SerialPort_setLinkLayerStateCallback(SerialPort self, IEC60870_LinkLayerStateChangedHandler callback, void* parameter)
 {
-    if (self) {
+    if (self)
+    {
         self->stateCallback = callback;
         self->stateCallbackParameter = parameter;
     }
 }
 
-bool parse_overtcp(const char* input, char* ip, int* port, int* retry)
+bool
+parse_overtcp(const char* input, char* ip, int* port, int* retry)
 {
     const char* prefix = "overtcp://";
     size_t prefix_len = strlen(prefix);
- 
+
     // Verificar si la cadena comienza con "overtcp://"
     if (strncmp(input, prefix, prefix_len) != 0)
     {
         printf("Formato incorrecto\n");
         return false;
     }
- 
+
     // Extraer la parte después del prefijo
     const char* address = input + prefix_len;
- 
+
     // Buscar el primer separador ":"
     const char* colon_pos1 = strchr(address, ':');
     if (colon_pos1 == NULL)
@@ -78,7 +80,7 @@ bool parse_overtcp(const char* input, char* ip, int* port, int* retry)
         printf("Formato incorrecto, falta el puerto\n");
         return false;
     }
- 
+
     // Extraer IP
     size_t ip_len = colon_pos1 - address;
     strncpy(ip, address, ip_len);
@@ -104,25 +106,27 @@ bool parse_overtcp(const char* input, char* ip, int* port, int* retry)
         // Extraer retry
         *retry = atoi(colon_pos2 + 1);
     }
- 
+
     // Extraer puerto
     //*port = atoi(colon_pos + 1);
     return true;
 }
 
-
 SerialPort
 SerialPort_create(const char* interfaceName, int baudRate, uint8_t dataBits, char parity, uint8_t stopBits)
 {
-    SerialPort self = (SerialPort) GLOBAL_MALLOC(sizeof(struct sSerialPort));
+    SerialPort self = (SerialPort)GLOBAL_MALLOC(sizeof(struct sSerialPort));
 
-    char ip[64];    
-    int port; 
+    char ip[64];
+    int port;
     int retry;
     bool overTcp = parse_overtcp(interfaceName, ip, &port, &retry);
 
-    if (self != NULL) {
+    if (self != NULL)
+    {
         self->fd = -1;
+        self->socket = NULL;
+        self->stateSocket = LL_STATE_ERROR;
         self->baudRate = baudRate;
         self->dataBits = dataBits;
         self->stopBits = stopBits;
@@ -134,11 +138,15 @@ SerialPort_create(const char* interfaceName, int baudRate, uint8_t dataBits, cha
         strncpy(self->interfaceName, interfaceName, 99);
         self->lastError = SERIAL_PORT_ERROR_NONE;
         self->overTcp = overTcp;
-        strncpy(self->ip, ip, 64);
+        self->ip[0] = '\0';
+        if (overTcp)
+        {
+            strncpy(self->ip, ip, sizeof(self->ip) - 1);
+            self->ip[sizeof(self->ip) - 1] = '\0';
+        }
         self->port = port;
         self->retry = retry;
         self->running = 0;
-        
     }
 
     return self;
@@ -147,74 +155,96 @@ SerialPort_create(const char* interfaceName, int baudRate, uint8_t dataBits, cha
 void
 SerialPort_destroy(SerialPort self)
 {
-    if (self != NULL) {
-        if(self->overTcp)
+    /*
+
+    if (self != NULL)
+    {
+        if (self->overTcp)
         {
-          
-            if (self->socket != NULL){              
+
+            if (self->socket != NULL)
+            {
                 Socket_destroy(self->socket);
-                self->socket = -1;
+                self->socket = NULL;
             }
         }
-    else{
         GLOBAL_FREEMEM(self);
-        }
     }
+    */
+
+    if (!self)
+        return;
+    SerialPort_close(self); // cierra recursos en ambos modos, si están abiertos
+    GLOBAL_FREEMEM(self);
 }
 
 bool
 SerialPort_open(SerialPort self)
 {
-
     if (self->overTcp)
     {
-
-        if (self->socket != NULL) {
-            self->running = Socket_checkAsyncConnectState(self->socket);            
-            Socket_destroy(self->socket);      
+        printf("DEBUG: Intentando conexión TCP a %s:%d\n", self->ip, self->port);
+        if (self->socket != NULL)
+        {
+            self->running = Socket_checkAsyncConnectState(self->socket);
+            Socket_destroy(self->socket);
             self->socket = NULL;
+            usleep(100000); // 100 ms
         }
-        else{
-           // printf("Socket ya es NULL antes de intentar destruirlo.\n");
-        }          
-      
+        else
+        {
+            // printf("Socket ya es NULL antes de intentar destruirlo.\n");
+            usleep(200000); // 200 ms
+        }
+
         self->lastConnection = Hal_getMonotonicTimeInMs();
 
+        usleep(100000);
         self->socket = TcpSocket_create();
-        if (self->socket == NULL) {   
+
+        if (self->socket == NULL)
+        {
+            printf("DEBUG: TcpSocket_create() FALLÓ\n");
             if (self->stateCallback)
-            self->stateCallback(self->stateCallbackParameter, 0, LL_STATE_ERROR);
+                self->stateCallback(self->stateCallbackParameter, 0, LL_STATE_ERROR);
             self->stateSocket = LL_STATE_ERROR;
+            printf("No se pudo crear el Socket\n");
 
             return false;
         }
+
+        printf("DEBUG: Socket creado exitosamente\n");
+
+        printf("DEBUG: Intentando Socket_connect...\n");
         if (self->stateCallback)
             self->stateCallback(self->stateCallbackParameter, 0, LL_STATE_BUSY);
-            self->stateSocket = LL_STATE_BUSY;
+        self->stateSocket = LL_STATE_BUSY;
 
-    
         if (Socket_connect(self->socket, self->ip, self->port))
-        {               
+        {
+            printf("DEBUG: Socket_connect EXITOSO\n");
             if (self->stateCallback)
                 self->stateCallback(self->stateCallbackParameter, 0, LL_STATE_AVAILABLE);
-                self->stateSocket = LL_STATE_AVAILABLE;
+            self->stateSocket = LL_STATE_AVAILABLE;
             return true;
-        }           
-        
+        }
+        printf("DEBUG: Socket_connect FALLÓ\n");
+
         if (self->stateCallback)
-        self->stateCallback(self->stateCallbackParameter, 0, LL_STATE_ERROR);
+            self->stateCallback(self->stateCallbackParameter, 0, LL_STATE_ERROR);
         self->stateSocket = LL_STATE_ERROR;
 
         Socket_destroy(self->socket);
-        self->socket = NULL;           
-        
-        return false;           
-    
+        self->socket = NULL;
+
+        usleep(200000);
+        return false;
     }
 
     self->fd = open(self->interfaceName, O_RDWR | O_NOCTTY | O_NDELAY | O_EXCL);
 
-    if (self->fd == -1) {
+    if (self->fd == -1)
+    {
         self->lastError = SERIAL_PORT_ERROR_OPEN_FAILED;
         return false;
     }
@@ -224,7 +254,8 @@ SerialPort_open(SerialPort self)
 
     tcgetattr(self->fd, &tios);
 
-    switch (self->baudRate) {
+    switch (self->baudRate)
+    {
     case 110:
         baudrate = B110;
         break;
@@ -264,7 +295,8 @@ SerialPort_open(SerialPort self)
     }
 
     /* Set baud rate */
-    if ((cfsetispeed(&tios, baudrate) < 0) || (cfsetospeed(&tios, baudrate) < 0)) {
+    if ((cfsetispeed(&tios, baudrate) < 0) || (cfsetospeed(&tios, baudrate) < 0))
+    {
         close(self->fd);
         self->fd = -1;
         self->lastError = SERIAL_PORT_ERROR_INVALID_BAUDRATE;
@@ -275,7 +307,8 @@ SerialPort_open(SerialPort self)
 
     /* Set data bits (5/6/7/8) */
     tios.c_cflag &= ~CSIZE;
-    switch (self->dataBits) {
+    switch (self->dataBits)
+    {
     case 5:
         tios.c_cflag |= CS5;
         break;
@@ -293,37 +326,46 @@ SerialPort_open(SerialPort self)
 
     /* Set stop bits (1/2) */
     if (self->stopBits == 1)
-        tios.c_cflag &=~ CSTOPB;
+        tios.c_cflag &= ~CSTOPB;
     else /* 2 */
         tios.c_cflag |= CSTOPB;
 
-    if (self->parity == 'N') {
-        tios.c_cflag &=~ PARENB;
-    } else if (self->parity == 'E') {
+    if (self->parity == 'N')
+    {
+        tios.c_cflag &= ~PARENB;
+    }
+    else if (self->parity == 'E')
+    {
         tios.c_cflag |= PARENB;
-        tios.c_cflag &=~ PARODD;
-    } else { /* 'O' */
+        tios.c_cflag &= ~PARODD;
+    }
+    else
+    { /* 'O' */
         tios.c_cflag |= PARENB;
         tios.c_cflag |= PARODD;
     }
 
     tios.c_lflag &= ~(ICANON | ECHO | ECHOE | ISIG);
 
-    if (self->parity == 'N') {
+    if (self->parity == 'N')
+    {
         tios.c_iflag &= ~INPCK;
-    } else {
+    }
+    else
+    {
         tios.c_iflag |= INPCK;
     }
 
     tios.c_iflag &= ~(IXON | IXOFF | IXANY | ICRNL);
     tios.c_iflag |= IGNBRK; /* Set ignore break to allow 0xff characters */
     tios.c_iflag |= IGNPAR;
-    tios.c_oflag &=~ OPOST;
+    tios.c_oflag &= ~OPOST;
 
     tios.c_cc[VMIN] = 0;
     tios.c_cc[VTIME] = 0;
 
-    if (tcsetattr(self->fd, TCSANOW, &tios) < 0) {
+    if (tcsetattr(self->fd, TCSANOW, &tios) < 0)
+    {
         close(self->fd);
         self->fd = -1;
         self->lastError = SERIAL_PORT_ERROR_INVALID_ARGUMENT;
@@ -337,24 +379,30 @@ SerialPort_open(SerialPort self)
 void
 SerialPort_close(SerialPort self)
 {
-    //printf("close\n");
-     
-    /*
-    
-    if (self != NULL) {
-        if(self->overTcp)
+    if (self != NULL)
+    {
+        if (self->overTcp)
         {
-            if (self->socket != NULL){             
+            if (self->socket != NULL)
+            {
                 Socket_destroy(self->socket);
-                self->socket = -1;
+                self->socket = NULL;
+            }
+            // GLOBAL_FREEMEM(self);
+            return;
+        }
+        else
+        {
+            if (self->fd != -1)
+            {
+                close(self->fd);
+                self->fd = 0;
             }
         }
-    }    
-    */
-    
-    if (self->fd != -1) {
-        close(self->fd);
-        self->fd = 0;
+    }
+    else
+    {
+        return;
     }
 }
 
@@ -364,42 +412,63 @@ SerialPort_getBaudRate(SerialPort self)
     return self->baudRate;
 }
 
-void reConnect(SerialPort self){
+void
+reConnect(SerialPort self)
+{
 
     if (self->stateSocket != LL_STATE_ERROR)
-    { 
+    {
         return;
     }
 
-    if (self->socket != NULL) {
+    if (self->socket != NULL)
+    {
         self->running = Socket_checkAsyncConnectState(self->socket);
-        
-     } else {
-         //printf("Socket es NULL.\n");
+    }
+    else
+    {
+        // printf("Socket es NULL.\n");
+    }
 
-     }        
+    uint64_t delta = Hal_getMonotonicTimeInMs() - self->lastConnection;
+    int retry = self->retry * 1000; // s a ms
 
-     uint64_t delta = Hal_getMonotonicTimeInMs()- self->lastConnection; 
-     int retry = self->retry * 1000; // s a ms 
-
-     if (delta > retry){
-         SerialPort_open(self);         
-     }   
-
+    if (delta > retry)
+    {
+        SerialPort_open(self);
+    }
 }
 
 void
 SerialPort_discardInBuffer(SerialPort self)
-{   
+{
     if (self->overTcp)
-    {  
+    {
+        /*
+
         self->stateSocket = LL_STATE_ERROR;
-        reConnect(self);      
+        reConnect(self);
+        */
+
+        if (!self->socket || self->stateSocket == LL_STATE_ERROR)
+        {
+            reConnect(self); // 👉 programa reintento si toca
+            return;
+        }
+        uint8_t tmp[512];
+        for (;;)
+        {
+            int n = Socket_read(self->socket, tmp, sizeof(tmp));
+            if (n <= 0)
+                break; // 0 = no hay más; <0 = error/cerrado → no cambies estado aquí
+        }
+
+        return;
     }
-    else{
+    else
+    {
         tcflush(self->fd, TCIOFLUSH);
-    }   
-    
+    }
 }
 
 void
@@ -417,24 +486,63 @@ SerialPort_getLastError(SerialPort self)
 
 int
 SerialPort_readByte(SerialPort self)
-{  
+{
+
+    /*
 
     uint8_t buf[1];
 
     if (self->overTcp)
     {
-       
-        if (self->socket != NULL) 
-        {           
+
+        if (self->socket != NULL)
+        {
             int len = Socket_read(self->socket, buf, 1);
             if (len == 0)
                 return -1;
             else
                 return (int)buf[0];
         }
-        
+    }
+    */
+
+    if (self->overTcp)
+    {
+
+        if (self->stateSocket == LL_STATE_ERROR || self->socket == NULL)
+        {
+            reConnect(self);
+            // devolvemos -1 para que la capa superior siga en su ciclo
+            return -1;
+        }
+
+        int timeout_ms = (int)(self->timeout.tv_sec * 1000 + self->timeout.tv_usec / 1000);
+        if (timeout_ms <= 0)
+            timeout_ms = 100;
+        uint64_t start = Hal_getMonotonicTimeInMs();
+
+        for (;;)
+        {
+            uint8_t b;
+            int n = Socket_read(self->socket, &b, 1);
+            if (n > 0)
+                return (int)b; // llegó 1 byte
+            if (n < 0)
+            { // peer cerró o error
+                if (self->stateCallback)
+                    self->stateCallback(self->stateCallbackParameter, 0, LL_STATE_ERROR);
+                self->stateSocket = LL_STATE_ERROR;
+                reConnect(self);
+                return -1;
+            }
+            // n == 0 → no hay datos ahora
+            if ((int)(Hal_getMonotonicTimeInMs() - start) >= timeout_ms)
+                return -1; // timeout
+            usleep(1000);
+        }
     }
 
+    uint8_t buf[1];
     fd_set set;
 
     self->lastError = SERIAL_PORT_ERROR_NONE;
@@ -444,16 +552,18 @@ SerialPort_readByte(SerialPort self)
 
     int ret = select(self->fd + 1, &set, NULL, NULL, &(self->timeout));
 
-    if (ret == -1) {
+    if (ret == -1)
+    {
         self->lastError = SERIAL_PORT_ERROR_UNKNOWN;
         return -1;
     }
     else if (ret == 0)
         return -1;
-    else {
-        read(self->fd, (char*) buf, 1);
+    else
+    {
+        read(self->fd, (char*)buf, 1);
 
-        return (int) buf[0];
+        return (int)buf[0];
     }
 }
 
@@ -462,14 +572,71 @@ SerialPort_write(SerialPort self, uint8_t* buffer, int startPos, int bufSize)
 {
     /* TODO assure minimum line idle time? */
 
+    /*
+
     if (self->overTcp)
     {
-        if (self->socket != NULL) 
-        {       
-            return Socket_write(self->socket, buffer + startPos, bufSize);    
-        }   
-        reConnect(self); 
-        return  -1;               
+
+        if (self->socket != NULL)
+        {
+            return Socket_write(self->socket, buffer + startPos, bufSize);
+        }
+        reConnect(self);
+        return -1;
+
+
+
+
+
+    }
+    */
+    if (self->overTcp)
+    {
+
+        if (!self->socket)
+        {
+            reConnect(self);
+            return -1;
+        }
+        if (bufSize <= 0)
+            return 0;
+
+        int timeout_ms = (int)(self->timeout.tv_sec * 1000 + self->timeout.tv_usec / 1000);
+        if (timeout_ms <= 0)
+            timeout_ms = 100; // fallback prudente
+
+        uint64_t deadline = Hal_getMonotonicTimeInMs() + (uint64_t)timeout_ms;
+        int total = 0;
+
+        while (total < bufSize)
+        {
+            int w = Socket_write(self->socket, buffer + startPos + total, bufSize - total);
+            if (w > 0)
+            {
+                total += w;
+                continue;
+            }
+            if (w == 0)
+            { /* EAGAIN/no listo */
+                if (Hal_getMonotonicTimeInMs() >= deadline)
+                {
+                    if (self->stateCallback)
+                        self->stateCallback(self->stateCallbackParameter, 0, LL_STATE_ERROR);
+                    self->stateSocket = LL_STATE_ERROR;
+                    return -1;
+                }
+                usleep(1000);
+                continue;
+            }
+
+            // w < 0 => error definitivo
+            if (self->stateCallback)
+                self->stateCallback(self->stateCallbackParameter, 0, LL_STATE_ERROR);
+            self->stateSocket = LL_STATE_ERROR;
+            return -1;
+        }
+        self->lastSentTime = Hal_getMonotonicTimeInMs();
+        return total;
     }
 
     self->lastError = SERIAL_PORT_ERROR_NONE;
