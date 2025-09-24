@@ -66,7 +66,7 @@ parse_overtcp(const char* input, char* ip, int* port, int* retry)
     // Verificar si la cadena comienza con "overtcp://"
     if (strncmp(input, prefix, prefix_len) != 0)
     {
-        printf("Formato incorrecto\n");
+        // printf("Formato incorrecto\n");
         return false;
     }
 
@@ -183,7 +183,7 @@ SerialPort_open(SerialPort self)
 {
     if (self->overTcp)
     {
-        printf("DEBUG: Intentando conexión TCP a %s:%d\n", self->ip, self->port);
+        // printf("DEBUG: Intentando conexión TCP a %s:%d\n", self->ip, self->port);
         if (self->socket != NULL)
         {
             self->running = Socket_checkAsyncConnectState(self->socket);
@@ -204,31 +204,31 @@ SerialPort_open(SerialPort self)
 
         if (self->socket == NULL)
         {
-            printf("DEBUG: TcpSocket_create() FALLÓ\n");
+            // printf("DEBUG: TcpSocket_create() FALLÓ\n");
             if (self->stateCallback)
                 self->stateCallback(self->stateCallbackParameter, 0, LL_STATE_ERROR);
             self->stateSocket = LL_STATE_ERROR;
-            printf("No se pudo crear el Socket\n");
+            // printf("No se pudo crear el Socket\n");
 
             return false;
         }
 
-        printf("DEBUG: Socket creado exitosamente\n");
+        // printf("DEBUG: Socket creado exitosamente\n");
 
-        printf("DEBUG: Intentando Socket_connect...\n");
+        // printf("DEBUG: Intentando Socket_connect...\n");
         if (self->stateCallback)
             self->stateCallback(self->stateCallbackParameter, 0, LL_STATE_BUSY);
         self->stateSocket = LL_STATE_BUSY;
 
         if (Socket_connect(self->socket, self->ip, self->port))
         {
-            printf("DEBUG: Socket_connect EXITOSO\n");
+            // printf("DEBUG: Socket_connect EXITOSO\n");
             if (self->stateCallback)
                 self->stateCallback(self->stateCallbackParameter, 0, LL_STATE_AVAILABLE);
             self->stateSocket = LL_STATE_AVAILABLE;
             return true;
         }
-        printf("DEBUG: Socket_connect FALLÓ\n");
+        // printf("DEBUG: Socket_connect FALLÓ\n");
 
         if (self->stateCallback)
             self->stateCallback(self->stateCallbackParameter, 0, LL_STATE_ERROR);
